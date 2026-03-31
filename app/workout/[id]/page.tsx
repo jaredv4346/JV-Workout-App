@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import type { Session, SessionExercise, Exercise, Set, PreviousSetData } from "@/lib/types";
+import ExercisePickerPanel from "@/components/ExercisePickerPanel";
 
 interface ExerciseWithSets extends SessionExercise {
   exercise: Exercise;
@@ -19,9 +20,33 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
   const [activeIndex, setActiveIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showExercisePicker, setShowExercisePicker] = useState(false);
+  const [allExercises, setAllExercises] = useState<Exercise[]>([]);
+
+  const isEditMode = !!session?.completed_at;
+
+  const loadPreviousSets = useCallback(async (exerciseId: string): Promise<PreviousSetData[]> => {
+    const { data: prevSessionExercise } = await supabase
+      .from("session_exercises")
+      .select("id, session:sessions!inner(started_at)")
+      .eq("exercise_id", exerciseId)
+      .neq("session_id", sessionId)
+      .order("session(started_at)", { ascending: false } as never)
+      .limit(1)
+      .single();
+
+    if (!prevSessionExercise) return [];
+
+    const { data: prevSets } = await supabase
+      .from("sets")
+      .select("set_number, weight, reps")
+      .eq("session_exercise_id", prevSessionExercise.id)
+      .order("set_number");
+
+    return prevSets || [];
+  }, [sessionId]);
 
   const loadSession = useCallback(async () => {
-    // Load session
     const { data: sess } = await supabase
       .from("sessions")
       .select("*, split_day:split_days(*)")
@@ -31,7 +56,6 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
     if (!sess) return;
     setSession(sess);
 
-    // Load session exercises with their sets
     const { data: sessionExercises } = await supabase
       .from("session_exercises")
       .select("*, exercise:exercises(*), sets(*)")
@@ -40,42 +64,29 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
 
     if (!sessionExercises) return;
 
-    // For each exercise, load the previous session's sets
     const exercisesWithPrevious: ExerciseWithSets[] = await Promise.all(
       sessionExercises.map(async (se: SessionExercise & { exercise: Exercise; sets: Set[] }) => {
-        // Find the most recent session_exercise for this exercise before this session
-        const { data: prevSessionExercise } = await supabase
-          .from("session_exercises")
-          .select("id, session:sessions!inner(started_at)")
-          .eq("exercise_id", se.exercise_id)
-          .neq("session_id", sessionId)
-          .order("session(started_at)", { ascending: false } as never)
-          .limit(1)
-          .single();
-
-        let previousSets: PreviousSetData[] = [];
-        if (prevSessionExercise) {
-          const { data: prevSets } = await supabase
-            .from("sets")
-            .select("set_number, weight, reps")
-            .eq("session_exercise_id", prevSessionExercise.id)
-            .order("set_number");
-
-          previousSets = prevSets || [];
-        }
-
-        // Sort sets by set_number
+        const previousSets = await loadPreviousSets(se.exercise_id);
         const sortedSets = [...(se.sets || [])].sort(
           (a, b) => a.set_number - b.set_number
         );
-
         return { ...se, sets: sortedSets, previousSets };
       })
     );
 
     setExercises(exercisesWithPrevious);
+
+    // Load all exercises for the picker
+    const { data: allEx } = await supabase
+      .from("exercises")
+      .select("*")
+      .eq("is_archived", false)
+      .order("muscle_group")
+      .order("name");
+    setAllExercises((allEx || []) as Exercise[]);
+
     setLoading(false);
-  }, [sessionId]);
+  }, [sessionId, loadPreviousSets]);
 
   useEffect(() => {
     loadSession();
@@ -86,7 +97,6 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
     const exercise = exercises[exerciseIndex];
     const nextSetNumber = exercise.sets.length + 1;
 
-    // Pre-fill from previous session's corresponding set, or last set in current session
     const prevSet = exercise.previousSets.find(
       (s) => s.set_number === nextSetNumber
     );
@@ -155,13 +165,78 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
     );
   }
 
-  async function finishWorkout() {
-    await supabase
-      .from("sessions")
-      .update({ completed_at: new Date().toISOString() })
-      .eq("id", sessionId);
+  async function addExerciseToSession(exerciseId: string) {
+    setSaving(true);
+    const newOrderIndex = exercises.length;
 
-    router.push("/");
+    const { data: newSE } = await supabase
+      .from("session_exercises")
+      .insert({
+        session_id: sessionId,
+        exercise_id: exerciseId,
+        order_index: newOrderIndex,
+      })
+      .select("*, exercise:exercises(*)")
+      .single();
+
+    if (newSE) {
+      const previousSets = await loadPreviousSets(exerciseId);
+      const newEntry: ExerciseWithSets = {
+        ...(newSE as SessionExercise & { exercise: Exercise }),
+        sets: [],
+        previousSets,
+      };
+      setExercises((prev) => [...prev, newEntry]);
+      setActiveIndex(newOrderIndex);
+    }
+    setSaving(false);
+    setShowExercisePicker(false);
+  }
+
+  async function removeExerciseFromSession(exerciseId: string) {
+    const exerciseIndex = exercises.findIndex((e) => e.exercise_id === exerciseId);
+    if (exerciseIndex === -1) return;
+
+    const exercise = exercises[exerciseIndex];
+    const setCount = exercise.sets.length;
+
+    if (setCount > 0) {
+      const confirmed = window.confirm(
+        `Remove ${exercise.exercise.name}? This will delete ${setCount} logged set${setCount > 1 ? "s" : ""}.`
+      );
+      if (!confirmed) return;
+    }
+
+    await supabase
+      .from("session_exercises")
+      .delete()
+      .eq("id", exercise.id);
+
+    setExercises((prev) => {
+      const updated = prev.filter((_, i) => i !== exerciseIndex);
+      return updated;
+    });
+
+    // Adjust activeIndex
+    if (exercises.length <= 1) {
+      setActiveIndex(0);
+    } else if (activeIndex >= exercises.length - 1) {
+      setActiveIndex(Math.max(0, exercises.length - 2));
+    } else if (exerciseIndex < activeIndex) {
+      setActiveIndex((prev) => prev - 1);
+    }
+  }
+
+  async function finishWorkout() {
+    if (isEditMode) {
+      router.push(`/history/${sessionId}`);
+    } else {
+      await supabase
+        .from("sessions")
+        .update({ completed_at: new Date().toISOString() })
+        .eq("id", sessionId);
+      router.push("/");
+    }
   }
 
   if (loading) {
@@ -173,6 +248,7 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
   }
 
   const activeExercise = exercises[activeIndex];
+  const currentExerciseIds = exercises.map((e) => e.exercise_id);
 
   return (
     <div className="flex flex-col min-h-full">
@@ -183,14 +259,17 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
             {session?.split_day?.label}
           </h1>
           <p className="text-muted text-xs">
+            {isEditMode ? "Editing — " : ""}
             {new Date(session?.date || "").toLocaleDateString()}
           </p>
         </div>
         <button
           onClick={finishWorkout}
-          className="bg-success text-white font-semibold px-4 py-2 rounded-xl text-sm"
+          className={`font-semibold px-4 py-2 rounded-xl text-sm text-white ${
+            isEditMode ? "bg-accent hover:bg-accent-hover" : "bg-success"
+          }`}
         >
-          Finish
+          {isEditMode ? "Done" : "Finish"}
         </button>
       </header>
 
@@ -214,14 +293,29 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
             )}
           </button>
         ))}
+        {/* Add exercise button */}
+        <button
+          onClick={() => setShowExercisePicker(true)}
+          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium bg-card border border-dashed border-card-border text-accent hover:border-accent transition-colors"
+        >
+          +
+        </button>
       </div>
 
       {/* Active exercise logging */}
-      {activeExercise && (
+      {activeExercise ? (
         <main className="flex-1 px-4 pt-4 pb-4 overflow-y-auto">
-          <h2 className="text-lg font-bold mb-1">
-            {activeExercise.exercise.name}
-          </h2>
+          <div className="flex items-start justify-between mb-1">
+            <h2 className="text-lg font-bold">
+              {activeExercise.exercise.name}
+            </h2>
+            <button
+              onClick={() => removeExerciseFromSession(activeExercise.exercise_id)}
+              className="text-danger text-xs font-medium px-2 py-1 shrink-0"
+            >
+              Remove
+            </button>
+          </div>
           <p className="text-xs text-muted mb-4">
             {activeExercise.exercise.muscle_group}
             {activeExercise.exercise.equipment &&
@@ -240,7 +334,7 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
             </div>
 
             {/* Set rows */}
-            {activeExercise.sets.map((set, setIdx) => {
+            {activeExercise.sets.map((set) => {
               const prevSet = activeExercise.previousSets.find(
                 (p) => p.set_number === set.set_number
               );
@@ -348,7 +442,27 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
             </button>
           </div>
         </main>
+      ) : (
+        <main className="flex-1 flex flex-col items-center justify-center px-4 gap-4">
+          <p className="text-muted">No exercises in this session.</p>
+          <button
+            onClick={() => setShowExercisePicker(true)}
+            className="bg-accent hover:bg-accent-hover text-white font-semibold px-6 py-3 rounded-xl transition-colors"
+          >
+            + Add Exercise
+          </button>
+        </main>
       )}
+
+      {/* Exercise Picker Panel */}
+      <ExercisePickerPanel
+        isOpen={showExercisePicker}
+        onClose={() => setShowExercisePicker(false)}
+        onAdd={addExerciseToSession}
+        onRemove={removeExerciseFromSession}
+        allExercises={allExercises}
+        currentExerciseIds={currentExerciseIds}
+      />
     </div>
   );
 }

@@ -53,9 +53,17 @@ export default async function SessionDetailPage({
   return (
     <div className="flex flex-col min-h-full pb-20">
       <header className="p-4 pt-6">
-        <Link href="/history" className="text-accent text-sm mb-2 inline-block">
-          &larr; Back to History
-        </Link>
+        <div className="flex items-center justify-between mb-2">
+          <Link href="/history" className="text-accent text-sm">
+            &larr; Back to History
+          </Link>
+          <Link
+            href={`/workout/${id}`}
+            className="text-accent text-sm font-medium px-3 py-1.5 rounded-lg border border-accent/30 hover:bg-accent/10 transition-colors"
+          >
+            Edit Session
+          </Link>
+        </div>
         <h1 className="text-xl font-bold">{s.split_day?.label}</h1>
         <p className="text-muted text-sm">
           {new Date(s.date).toLocaleDateString()}
