@@ -227,6 +227,31 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
     }
   }
 
+  async function reorderExercise(direction: -1 | 1) {
+    const newIndex = activeIndex + direction;
+    if (newIndex < 0 || newIndex >= exercises.length) return;
+
+    // Swap order_index in DB for the two exercises
+    const a = exercises[activeIndex];
+    const b = exercises[newIndex];
+    await supabase.from("session_exercises").update({ order_index: b.order_index }).eq("id", a.id);
+    await supabase.from("session_exercises").update({ order_index: a.order_index }).eq("id", b.id);
+
+    // Swap in state and follow the moved exercise
+    setExercises((prev) => {
+      const next = [...prev];
+      [next[activeIndex], next[newIndex]] = [next[newIndex], next[activeIndex]];
+      return next;
+    });
+    setActiveIndex(newIndex);
+  }
+
+  async function discardWorkout() {
+    if (!window.confirm("Discard this session? All logged data will be deleted.")) return;
+    await supabase.from("sessions").delete().eq("id", sessionId);
+    router.push("/");
+  }
+
   async function finishWorkout() {
     if (isEditMode) {
       router.push(`/history/${sessionId}`);
@@ -263,14 +288,24 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
             {new Date(session?.date || "").toLocaleDateString()}
           </p>
         </div>
-        <button
-          onClick={finishWorkout}
-          className={`font-semibold px-4 py-2 rounded-xl text-sm text-white ${
-            isEditMode ? "bg-accent hover:bg-accent-hover" : "bg-success"
-          }`}
-        >
-          {isEditMode ? "Done" : "Finish"}
-        </button>
+        <div className="flex items-center gap-2">
+          {!isEditMode && (
+            <button
+              onClick={discardWorkout}
+              className="text-danger text-sm font-medium px-3 py-2 rounded-xl border border-danger/30 hover:bg-danger/10 transition-colors"
+            >
+              Discard
+            </button>
+          )}
+          <button
+            onClick={finishWorkout}
+            className={`font-semibold px-4 py-2 rounded-xl text-sm text-white ${
+              isEditMode ? "bg-accent hover:bg-accent-hover" : "bg-success"
+            }`}
+          >
+            {isEditMode ? "Done" : "Finish"}
+          </button>
+        </div>
       </header>
 
       {/* Exercise tabs - horizontal scroll */}
@@ -306,15 +341,33 @@ export default function WorkoutPage({ params }: { params: Promise<{ id: string }
       {activeExercise ? (
         <main className="flex-1 px-4 pt-4 pb-4 overflow-y-auto">
           <div className="flex items-start justify-between mb-1">
-            <h2 className="text-lg font-bold">
+            <h2 className="text-lg font-bold flex-1 min-w-0 mr-2">
               {activeExercise.exercise.name}
             </h2>
-            <button
-              onClick={() => removeExerciseFromSession(activeExercise.exercise_id)}
-              className="text-danger text-xs font-medium px-2 py-1 shrink-0"
-            >
-              Remove
-            </button>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => reorderExercise(-1)}
+                disabled={activeIndex === 0}
+                className="text-muted text-xs px-2 py-1 disabled:opacity-30"
+                title="Move earlier"
+              >
+                ▲
+              </button>
+              <button
+                onClick={() => reorderExercise(1)}
+                disabled={activeIndex === exercises.length - 1}
+                className="text-muted text-xs px-2 py-1 disabled:opacity-30"
+                title="Move later"
+              >
+                ▼
+              </button>
+              <button
+                onClick={() => removeExerciseFromSession(activeExercise.exercise_id)}
+                className="text-danger text-xs font-medium px-2 py-1"
+              >
+                Remove
+              </button>
+            </div>
           </div>
           <p className="text-xs text-muted mb-4">
             {activeExercise.exercise.muscle_group}

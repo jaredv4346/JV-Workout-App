@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import BottomNav from "@/components/BottomNav";
 import Link from "next/link";
+import DeleteSessionButton from "@/components/DeleteSessionButton";
 
 export const dynamic = "force-dynamic";
 
@@ -57,12 +58,15 @@ export default async function SessionDetailPage({
           <Link href="/history" className="text-accent text-sm">
             &larr; Back to History
           </Link>
-          <Link
-            href={`/workout/${id}`}
-            className="text-accent text-sm font-medium px-3 py-1.5 rounded-lg border border-accent/30 hover:bg-accent/10 transition-colors"
-          >
-            Edit Session
-          </Link>
+          <div className="flex items-center gap-2">
+            <DeleteSessionButton sessionId={id} />
+            <Link
+              href={`/workout/${id}`}
+              className="text-accent text-sm font-medium px-3 py-1.5 rounded-lg border border-accent/30 hover:bg-accent/10 transition-colors"
+            >
+              Edit Session
+            </Link>
+          </div>
         </div>
         <h1 className="text-xl font-bold">{s.split_day?.label}</h1>
         <p className="text-muted text-sm">

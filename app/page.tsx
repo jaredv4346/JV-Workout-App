@@ -5,31 +5,40 @@ import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
-async function getNextSplitDay(): Promise<{
+async function getHomeData(): Promise<{
   splitDays: SplitDay[];
   suggestedDay: SplitDay | null;
-  lastSession: Session | null;
+  lastCompletedSession: Session | null;
+  activeSession: (Session & { split_day: SplitDay }) | null;
 }> {
-  const { data: splitDays } = await supabase
-    .from("split_days")
-    .select("*")
-    .order("order_index");
-
-  const { data: lastSession } = await supabase
-    .from("sessions")
-    .select("*, split_day:split_days(*)")
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .single();
+  const [{ data: splitDays }, { data: lastCompleted }, { data: activeSession }] =
+    await Promise.all([
+      supabase.from("split_days").select("*").order("order_index"),
+      // Rotation is based on last *completed* session only
+      supabase
+        .from("sessions")
+        .select("*, split_day:split_days(*)")
+        .not("completed_at", "is", null)
+        .order("completed_at", { ascending: false })
+        .limit(1)
+        .single(),
+      // Separately detect any in-progress session
+      supabase
+        .from("sessions")
+        .select("*, split_day:split_days(*)")
+        .is("completed_at", null)
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .single(),
+    ]);
 
   let suggestedDay: SplitDay | null = null;
   if (splitDays && splitDays.length > 0) {
-    if (lastSession) {
+    if (lastCompleted) {
       const lastIndex = splitDays.findIndex(
-        (d: SplitDay) => d.id === lastSession.split_day_id
+        (d: SplitDay) => d.id === lastCompleted.split_day_id
       );
-      const nextIndex = (lastIndex + 1) % splitDays.length;
-      suggestedDay = splitDays[nextIndex];
+      suggestedDay = splitDays[(lastIndex + 1) % splitDays.length];
     } else {
       suggestedDay = splitDays[0];
     }
@@ -38,32 +47,53 @@ async function getNextSplitDay(): Promise<{
   return {
     splitDays: splitDays || [],
     suggestedDay,
-    lastSession: lastSession || null,
+    lastCompletedSession: lastCompleted || null,
+    activeSession: (activeSession as (Session & { split_day: SplitDay })) || null,
   };
 }
 
 export default async function HomePage() {
-  const { splitDays, suggestedDay, lastSession } = await getNextSplitDay();
+  const { splitDays, suggestedDay, lastCompletedSession, activeSession } =
+    await getHomeData();
 
   return (
     <div className="flex flex-col min-h-full pb-20">
       <header className="p-4 pt-6">
         <h1 className="text-2xl font-bold">JV Workout</h1>
         <p className="text-muted text-sm mt-1">
-          {lastSession
-            ? `Last: ${lastSession.split_day?.label} on ${new Date(lastSession.date).toLocaleDateString()}`
+          {lastCompletedSession
+            ? `Last: ${lastCompletedSession.split_day?.label} on ${new Date(lastCompletedSession.date).toLocaleDateString()}`
             : "No workouts yet. Let's get started!"}
         </p>
       </header>
 
       <main className="flex-1 px-4 space-y-4">
-        {/* Start Workout CTA */}
+        {/* Continue active session — shown prominently when one is in progress */}
+        {activeSession && (
+          <Link
+            href={`/workout/${activeSession.id}`}
+            className="flex items-center justify-between w-full bg-success/15 border border-success/30 text-white px-5 py-4 rounded-xl transition-colors hover:bg-success/20"
+          >
+            <div>
+              <p className="text-xs text-success font-medium uppercase tracking-wide mb-0.5">
+                In Progress
+              </p>
+              <p className="font-semibold">
+                Continue: {activeSession.split_day?.label}
+              </p>
+            </div>
+            <span className="text-success text-xl">→</span>
+          </Link>
+        )}
+
+        {/* Start new workout CTA */}
         {suggestedDay && (
           <Link
             href={`/setup?split=${suggestedDay.id}`}
             className="block w-full bg-accent hover:bg-accent-hover text-white text-center font-semibold text-lg py-4 rounded-xl transition-colors"
           >
-            Start: {suggestedDay.label}
+            {activeSession ? "New: " : "Start: "}
+            {suggestedDay.label}
           </Link>
         )}
 
