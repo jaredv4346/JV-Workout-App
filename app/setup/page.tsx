@@ -8,10 +8,11 @@ import BottomNav from "@/components/BottomNav";
 
 // Mapping of split days to relevant muscle groups
 const splitMuscleGroups: Record<string, string[]> = {
-  "Chest/Shoulders": ["Chest", "Shoulders"],
-  Arms: ["Biceps", "Triceps"],
-  Back: ["Back"],
-  Legs: ["Quads", "Hamstrings", "Glutes", "Calves"],
+  Push: ["Chest", "Shoulders", "Triceps"],
+  Pull: ["Back", "Biceps"],
+  Legs: ["Quads", "Glutes", "Hamstrings", "Calves"],
+  Upper: ["Chest", "Shoulders", "Triceps", "Back", "Biceps"],
+  Lower: ["Quads", "Glutes", "Hamstrings", "Calves", "Core"],
 };
 
 function SetupContent() {

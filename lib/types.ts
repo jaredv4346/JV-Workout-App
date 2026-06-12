@@ -12,6 +12,7 @@ export interface SplitDay {
   id: string;
   label: string;
   order_index: number;
+  is_archived: boolean;
   created_at: string;
 }
 

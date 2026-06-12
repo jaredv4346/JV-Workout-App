@@ -13,7 +13,11 @@ async function getHomeData(): Promise<{
 }> {
   const [{ data: splitDays }, { data: lastCompleted }, { data: activeSession }] =
     await Promise.all([
-      supabase.from("split_days").select("*").order("order_index"),
+      supabase
+        .from("split_days")
+        .select("*")
+        .eq("is_archived", false)
+        .order("order_index"),
       // Rotation is based on last *completed* session only
       supabase
         .from("sessions")

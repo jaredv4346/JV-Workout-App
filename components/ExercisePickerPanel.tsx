@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { Exercise } from "@/lib/types";
 
 interface ExercisePickerPanelProps {
@@ -19,6 +20,8 @@ export default function ExercisePickerPanel({
   allExercises,
   currentExerciseIds,
 }: ExercisePickerPanelProps) {
+  const [filter, setFilter] = useState<string>("");
+
   if (!isOpen) return null;
 
   const inSession = allExercises.filter((e) =>
@@ -27,6 +30,14 @@ export default function ExercisePickerPanel({
   const available = allExercises.filter(
     (e) => !currentExerciseIds.includes(e.id)
   );
+
+  const muscleGroups = [
+    ...new Set(available.map((e) => e.muscle_group)),
+  ].sort();
+
+  const filteredAvailable = filter
+    ? available.filter((e) => e.muscle_group === filter)
+    : available;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
@@ -87,8 +98,36 @@ export default function ExercisePickerPanel({
               <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">
                 Add Exercise
               </h3>
+
+              {/* Muscle group filter chips */}
+              <div className="flex gap-2 overflow-x-auto pb-2 mb-1 scrollbar-none">
+                <button
+                  onClick={() => setFilter("")}
+                  className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    !filter
+                      ? "bg-accent text-white"
+                      : "bg-card border border-card-border text-muted"
+                  }`}
+                >
+                  All
+                </button>
+                {muscleGroups.map((mg) => (
+                  <button
+                    key={mg}
+                    onClick={() => setFilter(mg)}
+                    className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      filter === mg
+                        ? "bg-accent text-white"
+                        : "bg-card border border-card-border text-muted"
+                    }`}
+                  >
+                    {mg}
+                  </button>
+                ))}
+              </div>
+
               <div className="space-y-1">
-                {available.map((ex) => (
+                {filteredAvailable.map((ex) => (
                   <button
                     key={ex.id}
                     onClick={() => onAdd(ex.id)}
@@ -105,6 +144,11 @@ export default function ExercisePickerPanel({
                     </span>
                   </button>
                 ))}
+                {filteredAvailable.length === 0 && (
+                  <p className="text-xs text-muted py-2">
+                    No exercises in this muscle group.
+                  </p>
+                )}
               </div>
             </section>
           )}
